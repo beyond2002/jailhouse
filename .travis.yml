@@ -8,7 +8,7 @@
 #
 # This work is licensed under the terms of the GNU GPL, version 2.  See
 # the COPYING file in the top-level directory.
-#
+# Don't konw whether it can be changed.
 
 language: c
 
@@ -51,8 +51,8 @@ script:
 addons:
   coverity_scan:
     project:
-      name: "siemens/jailhouse"
-    notification_email: jan.kiszka@siemens.com
+      name: "beyond/jailhouse"
+    notification_email: beyond2002@gmail.com
     build_script_url: https://raw.githubusercontent.com/$TRAVIS_REPO_SLUG/$TRAVIS_BRANCH/ci/coverity-scan-build.sh
     build_command_prepend: "cov-configure --comptype gcc --compiler arm-linux-gnueabihf-gcc --template; cov-configure --comptype gcc --compiler aarch64-linux-gnu-gcc --template"
     build_command: "unused"
