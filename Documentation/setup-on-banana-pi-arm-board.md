@@ -149,11 +149,11 @@ $ git clone https://github.com/siemens/jailhouse.git
 #Download the recommended cross-toolchain from Linaro
 
 $ cd ~
-$ wget https://releases.linaro.org/components/toolchain/binaries/latest-5/arm-linux-gnueabihf/gcc-linaro-5.3-2016.02-x86_64_arm-linux-gnueabihf.tar.xz
-$ tar -xf gcc-linaro-5.3-2016.02-x86_64_arm-linux-gnueabihf.tar.xz
+$ wget https://releases.linaro.org/components/toolchain/binaries/latest/arm-linux-gnueabihf/gcc-linaro-7.1.1-2017.08-x86_64_arm-linux-gnueabihf.tar.xz
+$ tar -xf gcc-linaro-7.1.1-2017.08-x86_64_arm-linux-gnueabihf.tar.xz
 
 #Update environment path
-$ export PATH=$PATH:$(pwd)/gcc-linaro-5.3-2016.02-x86_64_arm-linux-gnueabihf/bin
+$ export PATH=$PATH:$(pwd)/gcc-linaro-7.1.1-2017.08-x86_64_arm-linux-gnueabihf/bin
 ```
 
 * Apply patches and Setup config
@@ -172,7 +172,7 @@ $ make ARCH=arm menuconfig
 
 * Compile Kernel
 ```bash
-$ sudo apt-get update && sudo apt-get install -y u-boot-tools
+$ sudo apt-get update && sudo apt-get install -y u-boot-tools bc
 $ make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- -j8 uImage modules dtbs LOADADDR=40008000
 ```
 
