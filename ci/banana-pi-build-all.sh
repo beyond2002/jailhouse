@@ -1,6 +1,6 @@
 HOMEDIR=/home/beyond2002
 #build kernel
-cd $HOMEDIR/project/linux_stable
+cd $HOMEDIR/project/linux-stable
 for i in ../bananian/kernel/4.3.3/patches/*; do patch -p1 < $i; done
 cp -av ../jailhouse/ci/kernel-config-banana-pi .config
 make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- -j8 uImage modules dtbs LOADADDR=40008000
