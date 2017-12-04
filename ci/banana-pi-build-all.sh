@@ -3,7 +3,6 @@ HOMEDIR=/home/beyond2002
 cd $HOMEDIR/project/linux-stable
 for i in ../bananian/kernel/4.3.3/patches/*; do patch -p1 < $i; done
 cp -av ../jailhouse/ci/kernel-config-banana-pi .config
-make ARCH=arm menuconfig
 make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- -j8 uImage modules dtbs LOADADDR=40008000
 #build jailhouse
 cp -av $HOMEDIR/project/freertos-cell/jailhouse-configs/bananapi.c $HOMEDIR/project/jailhouse/configs/bananapi.c
