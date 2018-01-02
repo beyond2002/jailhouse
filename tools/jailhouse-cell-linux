@@ -246,9 +246,11 @@ class X86:
     name = 'x86'
 
     def setup(self, args, config):
+        self._cpu_reset_address = config.cpu_reset_address
+
         self._zero_page = X86ZeroPage(args.kernel, args.initrd, config)
 
-        setup_data = x86_gen_setup_data()
+        setup_data = x86_gen_setup_data(config)
 
         self._zero_page.setup_header.set_setup_data(
             arch.params_address() + 0x1000)
@@ -278,13 +280,11 @@ jailhouse cell load %s linux-loader.bin -a 0x%x %s -a 0x%x ' %
         print('%s -a 0x%x' % (args.write_params.name, arch.params_address()))
         print('jailhouse cell start %s' % config.name)
 
-    @staticmethod
-    def loader_address():
-        return 0xf0000
+    def loader_address(self):
+        return self._cpu_reset_address
 
-    @staticmethod
-    def params_address():
-        return 0xf5000
+    def params_address(self):
+        return self._cpu_reset_address + 0x6000
 
     def kernel_address(self):
         return self._zero_page.kernel_load_addr
@@ -508,9 +508,30 @@ class MemoryRegion:
                            MemoryRegion.E820_RESERVED)
 
 
+class CacheRegion:
+    _REGION_FORMAT = 'IIBxH'
+    SIZE = struct.calcsize(_REGION_FORMAT)
+
+
+class Irqchip:
+    _IRQCHIP_FORMAT = 'QIIQQ'
+    SIZE = struct.calcsize(_IRQCHIP_FORMAT)
+
+    def __init__(self, irqchip_struct):
+        (self.address,
+         self.id,
+         self.pin_base,
+         self.pin_bitmap_lo,
+         self.pin_bitmap_hi) = \
+            struct.unpack_from(self._IRQCHIP_FORMAT, irqchip_struct)
+
+    def is_standard(self):
+        return self.address == 0xfec00000
+
+
 class Config:
     _HEADER_FORMAT = '6sH32s4xIIIIIIIIIQ8x'
-    _HEADER_REVISION = 7
+    _HEADER_REVISION = 8
 
     def __init__(self, config_file):
         self.data = config_file.read()
@@ -545,6 +566,14 @@ class Config:
             self.memory_regions.append(
                 MemoryRegion(self.data[memregion_offs:]))
             memregion_offs += MemoryRegion.SIZE
+
+        irqchip_offs = memregion_offs + \
+            self.num_cache_regions * CacheRegion.SIZE
+        self.irqchips = []
+        for n in range(self.num_irqchips):
+            self.irqchips.append(
+                Irqchip(self.data[irqchip_offs:]))
+            irqchip_offs += Irqchip.SIZE
 
 
 # see linux/Documentation/x86/boot.txt
@@ -627,9 +656,9 @@ class X86ZeroPage:
         if initrd:
             kernel_size = os.fstat(kernel.fileno()).st_size
             ramdisk_size = os.fstat(initrd.fileno()).st_size
-            # same as arm, magic factor 5 works, anything below does not
+            # same as arm, magic factor 10 works generally fine
             ramdisk_load_addr = page_align(self.kernel_load_addr +
-                                           5 * kernel_size)
+                                           10 * kernel_size)
 
         self.setup_header.set_ramdisk_image(ramdisk_load_addr)
         self.setup_header.set_ramdisk_size(ramdisk_size)
@@ -688,9 +717,18 @@ class JailhouseCell:
         fcntl.ioctl(self.dev, JailhouseCell.JAILHOUSE_CELL_START, start)
 
 
-def x86_gen_setup_data():
+def x86_gen_setup_data(config):
+    SETUP_TYPE_JAILHOUSE = 6
     MAX_CPUS = 255
-    return struct.pack('8x4sI4x', b'JLHS', 4 + MAX_CPUS) + bytearray(MAX_CPUS)
+    SETUP_DATA_VERSION = 1
+    standard_ioapic = 0
+    for irqchip in config.irqchips:
+        if irqchip.is_standard():
+            standard_ioapic = 1
+    return struct.pack('8xIIHH12x8xB', SETUP_TYPE_JAILHOUSE, 25 + MAX_CPUS,
+                       SETUP_DATA_VERSION, SETUP_DATA_VERSION,
+                       standard_ioapic) + \
+        bytearray(MAX_CPUS)
 
 
 # pretend to be part of the jailhouse tool

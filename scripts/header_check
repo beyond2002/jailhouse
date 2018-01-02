@@ -23,6 +23,7 @@ fi
 CFLAGS="-fno-builtin-ffsl -Wall -Wstrict-prototypes -Wtype-limits \
 	-Wmissing-declarations -Wmissing-prototypes \
 	-Ihypervisor/arch/$ARCH/include -Ihypervisor/include \
+	-Iinclude/arch/$ARCH -Iinclude \
 	$INCLUDE_ARM_COMMON $EXTRA_CFLAGS"
 
 test_compile()
@@ -57,6 +58,14 @@ for header in hypervisor/include/jailhouse/*.h; do
 done
 
 for header in hypervisor/arch/$ARCH/include/asm/*.h; do
+	test_compile asm $header
+done
+
+for header in include/jailhouse/*.h; do
+	test_compile jailhouse $header
+done
+
+for header in include/arch/$ARCH/asm/*.h; do
 	test_compile asm $header
 done
 

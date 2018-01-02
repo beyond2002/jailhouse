@@ -13,6 +13,7 @@
 #include <jailhouse/paging.h>
 #include <jailhouse/string.h>
 #include <jailhouse/utils.h>
+#include <asm/vcpu.h>
 
 #define X86_FLAG_HUGEPAGE	0x80
 
@@ -222,29 +223,33 @@ const struct paging i386_paging[] = {
 	},
 };
 
-static bool realmode_entry_valid(pt_entry_t pte, unsigned long flags)
+/* Can be overridden in vendor-specific code if needed */
+pt_entry_t __attribute__((weak)) vcpu_pae_get_pdpte(page_table_t page_table,
+						    unsigned long virt)
 {
-	return true;
+	return &page_table[(virt >> 30) & 0x3];
 }
 
-static pt_entry_t realmode_get_entry(page_table_t page_table,
-		unsigned long virt)
-{
-	return NULL;
-}
-
-static unsigned long realmode_get_phys(pt_entry_t pte, unsigned long virt)
-{
-	return virt;
-}
-
-/* naturally read-only */
-const struct paging realmode_paging[] = {
+/* read-only, no page table construction supported */
+const struct paging pae_paging[] = {
+	{
+		.entry_valid	= x86_64_entry_valid,
+		.get_entry	= vcpu_pae_get_pdpte,
+		.get_phys	= paging_get_phys_invalid,
+		.get_next_pt	= x86_64_get_next_pt,
+	},
+	{
+		.page_size	= 2 * 1024 * 1024,
+		.entry_valid	= x86_64_entry_valid,
+		.get_entry	= x86_64_get_entry_l2,
+		.get_phys	= x86_64_get_phys_l2,
+		.get_next_pt	= x86_64_get_next_pt,
+	},
 	{
 		.page_size	= PAGE_SIZE,
-		.entry_valid	= realmode_entry_valid,
-		.get_entry	= realmode_get_entry,
-		.get_phys	= realmode_get_phys,
+		.entry_valid	= x86_64_entry_valid,
+		.get_entry	= x86_64_get_entry_l1,
+		.get_phys	= x86_64_get_phys_l1,
 		/* get_next_pt not valid */
 	},
 };

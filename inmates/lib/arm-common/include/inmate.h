@@ -61,6 +61,11 @@ static inline void mmio_write8(void *address, u8 value)
 	*(volatile u8 *)address = value;
 }
 
+static inline u16 mmio_read16(void *address)
+{
+	return *(volatile u16 *)address;
+}
+
 static inline void mmio_write16(void *address, u16 value)
 {
 	*(volatile u16 *)address = value;

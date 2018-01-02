@@ -26,6 +26,7 @@ struct {
 	struct jailhouse_memory mem_regions[4];
 #endif
 	struct jailhouse_cache cache_regions[1];
+	struct jailhouse_irqchip irqchips[1];
 	__u8 pio_bitmap[0x2000];
 #ifdef CONFIG_QEMU_E1000E_ASSIGNMENT
 	struct jailhouse_pci_device pci_devices[2];
@@ -38,12 +39,13 @@ struct {
 		.signature = JAILHOUSE_CELL_DESC_SIGNATURE,
 		.revision = JAILHOUSE_CONFIG_REVISION,
 		.name = "linux-x86-demo",
-		.flags = JAILHOUSE_CELL_PASSIVE_COMMREG,
+		.flags = JAILHOUSE_CELL_PASSIVE_COMMREG |
+			JAILHOUSE_CELL_DEBUG_CONSOLE,
 
 		.cpu_set_size = sizeof(config.cpus),
 		.num_memory_regions = ARRAY_SIZE(config.mem_regions),
 		.num_cache_regions = ARRAY_SIZE(config.cache_regions),
-		.num_irqchips = 0,
+		.num_irqchips = ARRAY_SIZE(config.irqchips),
 		.pio_bitmap_size = ARRAY_SIZE(config.pio_bitmap),
 		.num_pci_devices = ARRAY_SIZE(config.pci_devices),
 		.num_pci_caps = ARRAY_SIZE(config.pci_caps),
@@ -120,6 +122,16 @@ struct {
 			.start = 0,
 			.size = 2,
 			.type = JAILHOUSE_CACHE_L3,
+		},
+	},
+
+	.irqchips = {
+		/* IOAPIC */ {
+			.address = 0xfec00000,
+			.id = 0xff00,
+			.pin_bitmap = {
+				(1 << 3) | (1 << 4),
+			},
 		},
 	},
 

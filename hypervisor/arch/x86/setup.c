@@ -243,6 +243,7 @@ void __attribute__((noreturn)) arch_cpu_activate_vmm(struct per_cpu *cpu_data)
 
 void arch_cpu_restore(struct per_cpu *cpu_data, int return_code)
 {
+	static spinlock_t tss_lock;
 	unsigned int tss_idx;
 	u64 *linux_gdt;
 
@@ -254,18 +255,26 @@ void arch_cpu_restore(struct per_cpu *cpu_data, int return_code)
 	write_msr(MSR_IA32_PAT, cpu_data->pat);
 	write_msr(MSR_EFER, cpu_data->linux_efer);
 	write_cr0(cpu_data->linux_cr0);
-	write_cr3(cpu_data->linux_cr3);
 	write_cr4(cpu_data->linux_cr4);
+	/* cr3 must be last in case cr4 enables PCID */
+	write_cr3(cpu_data->linux_cr3);
 
 	/*
 	 * Copy Linux TSS descriptor into our GDT, clearing the busy flag,
 	 * then reload TR from it. We can't use Linux' GDT as it is r/o.
+	 * Access can happen concurrently on multiple CPUs, so we have to
+	 * serialize the critical section.
 	 */
 	linux_gdt = (u64 *)cpu_data->linux_gdtr.base;
 	tss_idx = cpu_data->linux_tss.selector / 8;
+
+	spin_lock(&tss_lock);
+
 	gdt[tss_idx] = linux_gdt[tss_idx] & ~DESC_TSS_BUSY;
 	gdt[tss_idx + 1] = linux_gdt[tss_idx + 1];
 	asm volatile("ltr %%ax" : : "a" (cpu_data->linux_tss.selector));
+
+	spin_unlock(&tss_lock);
 
 	asm volatile("lgdtq %0" : : "m" (cpu_data->linux_gdtr));
 	asm volatile("lidtq %0" : : "m" (cpu_data->linux_idtr));

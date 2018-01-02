@@ -32,6 +32,7 @@ struct exception_frame {
 
 int arch_cell_create(struct cell *cell)
 {
+	struct jailhouse_comm_region *comm_region = &cell->comm_page.comm_region;
 	unsigned int cpu;
 	int err;
 
@@ -51,11 +52,15 @@ int arch_cell_create(struct cell *cell)
 	if (err)
 		goto error_ioapic_exit;
 
-	cell->comm_page.comm_region.pm_timer_address =
+	comm_region->pm_timer_address =
 		system_config->platform_info.x86.pm_timer_address;
-	cell->comm_page.comm_region.num_cpus = 0;
+	comm_region->pci_mmconfig_base =
+		system_config->platform_info.pci_mmconfig_base;
+	comm_region->num_cpus = 0;
 	for_each_cpu(cpu, cell->cpu_set)
-		cell->comm_page.comm_region.num_cpus++;
+		comm_region->num_cpus++;
+	comm_region->tsc_khz = system_config->platform_info.x86.tsc_khz;
+	comm_region->apic_khz = system_config->platform_info.x86.apic_khz;
 
 	return 0;
 
@@ -121,6 +126,7 @@ void arch_cell_destroy(struct cell *cell)
 
 void arch_cell_reset(struct cell *cell)
 {
+	ioapic_cell_reset(cell);
 }
 
 void arch_config_commit(struct cell *cell_added_removed)

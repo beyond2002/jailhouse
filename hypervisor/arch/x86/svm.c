@@ -559,24 +559,29 @@ void vcpu_vendor_reset(unsigned int sipi_vector)
 	};
 	struct per_cpu *cpu_data = this_cpu_data();
 	struct vmcb *vmcb = &cpu_data->vmcb;
-	unsigned long val;
+	unsigned long reset_addr;
 
 	vmcb->cr0 = X86_CR0_NW | X86_CR0_CD | X86_CR0_ET;
 	vmcb->cr3 = 0;
 	vmcb->cr4 = 0;
 
 	vmcb->rflags = 0x02;
-
-	val = 0;
-	if (sipi_vector == APIC_BSP_PSEUDO_SIPI) {
-		val = 0xfff0;
-		sipi_vector = 0xf0;
-	}
-	vmcb->rip = val;
 	vmcb->rsp = 0;
 
-	vmcb->cs.selector = sipi_vector << 8;
-	vmcb->cs.base = sipi_vector << 12;
+	if (sipi_vector == APIC_BSP_PSEUDO_SIPI) {
+		reset_addr = this_cell()->config->cpu_reset_address;
+
+		vmcb->rip = reset_addr & 0xffff;
+
+		vmcb->cs.selector = (reset_addr >> 4) & 0xf000;
+		vmcb->cs.base = reset_addr & ~0xffffL;
+	} else {
+		vmcb->rip = 0;
+
+		vmcb->cs.selector = sipi_vector << 8;
+		vmcb->cs.base = sipi_vector << 12;
+	}
+
 	vmcb->cs.limit = 0xffff;
 	vmcb->cs.access_rights = 0x009b;
 
@@ -649,34 +654,22 @@ static void update_efer(struct vmcb *vmcb)
 	vmcb->clean_bits &= ~CLEAN_BITS_CRX;
 }
 
-bool vcpu_get_guest_paging_structs(struct guest_paging_structures *pg_structs)
+void vcpu_get_guest_paging_structs(struct guest_paging_structures *pg_structs)
 {
 	struct vmcb *vmcb = &this_cpu_data()->vmcb;
 
 	if (vmcb->efer & EFER_LMA) {
 		pg_structs->root_paging = x86_64_paging;
 		pg_structs->root_table_gphys = vmcb->cr3 & BIT_MASK(51, 12);
-	} else if ((vmcb->cr0 & X86_CR0_PG) &&
-		   !(vmcb->cr4 & X86_CR4_PAE)) {
+	} else if (!(vmcb->cr0 & X86_CR0_PG)) {
+		pg_structs->root_paging = NULL;
+	} else if (vmcb->cr4 & X86_CR4_PAE) {
+		pg_structs->root_paging = pae_paging;
+		pg_structs->root_table_gphys = vmcb->cr3 & BIT_MASK(31, 5);
+	} else {
 		pg_structs->root_paging = i386_paging;
 		pg_structs->root_table_gphys = vmcb->cr3 & BIT_MASK(31, 12);
-	} else if (!(vmcb->cr0 & X86_CR0_PG)) {
-		/*
-		 * Can be in non-paged protected mode as well, but
-		 * the translation mechanism will stay the same ayway.
-		 */
-		pg_structs->root_paging = realmode_paging;
-		/*
-		 * This will make paging_get_guest_pages map the page
-		 * that also contains the bootstrap code and, thus, is
-		 * always present in a cell.
-		 */
-		pg_structs->root_table_gphys = 0xff000;
-	} else {
-		printk("FATAL: Unsupported paging mode\n");
-		return false;
 	}
-	return true;
 }
 
 void vcpu_vendor_set_guest_pat(unsigned long val)
@@ -719,9 +712,9 @@ static bool svm_parse_mov_to_cr(struct vmcb *vmcb, unsigned long pc,
 	u8 opcodes[] = {0x0f, 0x22}, modrm;
 	int n;
 
+	vcpu_get_guest_paging_structs(&pg_structs);
+
 	ctx.remaining = ARRAY_SIZE(opcodes);
-	if (!vcpu_get_guest_paging_structs(&pg_structs))
-		return false;
 	ctx.cs_base = (vmcb->efer & EFER_LMA) ? 0 : vmcb->cs.base;
 
 	if (!ctx_advance(&ctx, &pc, &pg_structs))
@@ -827,8 +820,7 @@ static bool svm_handle_apic_access(struct vmcb *vmcb)
 	if (offset & 0x00f)
 		goto out_err;
 
-	if (!vcpu_get_guest_paging_structs(&pg_structs))
-		goto out_err;
+	vcpu_get_guest_paging_structs(&pg_structs);
 
 	inst_len = apic_mmio_access(vmcb->rip, &pg_structs, offset >> 4,
 				    is_write);
@@ -987,7 +979,7 @@ void vcpu_park(void)
 		return;
 	}
 #endif
-	vcpu_vendor_reset(APIC_BSP_PSEUDO_SIPI);
+	vcpu_vendor_reset(0);
 	/* No need to clear VMCB Clean bit: vcpu_vendor_reset() already does
 	 * this. */
 	this_cpu_data()->vmcb.n_cr3 = paging_hvirt2phys(parking_pt.root_table);

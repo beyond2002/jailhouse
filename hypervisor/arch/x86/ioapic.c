@@ -1,7 +1,7 @@
 /*
  * Jailhouse, a Linux-based partitioning hypervisor
  *
- * Copyright (c) Siemens AG, 2014-2016
+ * Copyright (c) Siemens AG, 2014-2017
  *
  * Authors:
  *  Jan Kiszka <jan.kiszka@siemens.com>
@@ -26,7 +26,6 @@
 #define IOAPIC_REG_INDEX	0x00
 #define IOAPIC_REG_DATA		0x10
 #define IOAPIC_REG_EOI		0x40
-#define IOAPIC_ID		0x00
 #define IOAPIC_VER		0x01
 # define IOPAPIC_VER_MRE(ver)	(((ver) & BIT_MASK(23, 16)) >> 16)
 #define IOAPIC_REDIR_TBL_START	0x10
@@ -208,16 +207,11 @@ int ioapic_init(void)
 
 void ioapic_prepare_handover(void)
 {
-	enum ioapic_handover handover;
 	struct cell_ioapic *ioapic;
-	struct cell *cell;
 	unsigned int n;
 
-	for_each_cell(cell) {
-		handover = (cell == &root_cell) ? PINS_ACTIVE : PINS_MASKED;
-		for_each_cell_ioapic(ioapic, cell, n)
-			ioapic_mask_cell_pins(ioapic, handover);
-	}
+	for_each_cell_ioapic(ioapic, &root_cell, n)
+		ioapic_mask_cell_pins(ioapic, PINS_ACTIVE);
 }
 
 int ioapic_get_or_add_phys(const struct jailhouse_irqchip *irqchip,
@@ -295,7 +289,7 @@ static enum mmio_result ioapic_access_handler(void *arg,
 	case IOAPIC_REG_DATA:
 		index = ioapic->index_reg_val;
 
-		if (index == IOAPIC_ID || index == IOAPIC_VER) {
+		if (index < IOAPIC_REDIR_TBL_START) {
 			if (mmio->is_write)
 				goto invalid_access;
 			mmio->value = ioapic_reg_read(ioapic->phys_ioapic,
@@ -303,14 +297,16 @@ static enum mmio_result ioapic_access_handler(void *arg,
 			return MMIO_HANDLED;
 		}
 
-		if (index < IOAPIC_REDIR_TBL_START ||
-		    index >= (IOAPIC_REDIR_TBL_START +
+		if (index >= (IOAPIC_REDIR_TBL_START +
 			      ioapic->phys_ioapic->pins * 2))
 			goto invalid_access;
 
 		entry = (index - IOAPIC_REDIR_TBL_START) / 2;
-		if (!test_bit(entry, (unsigned long *)ioapic->pin_bitmap))
-			goto invalid_access;
+		if (!test_bit(entry, (unsigned long *)ioapic->pin_bitmap)) {
+			/* ignore access */
+			mmio->value = 0;
+			return MMIO_HANDLED;
+		}
 
 		if (mmio->is_write) {
 			if (ioapic_virt_redir_write(ioapic, index,
@@ -395,10 +391,18 @@ int ioapic_cell_init(struct cell *cell)
 		for (pos = 0; pos < ARRAY_SIZE(irqchip->pin_bitmap); pos++)
 			root_ioapic->pin_bitmap[pos] &=
 				~irqchip->pin_bitmap[pos];
-		ioapic_mask_cell_pins(ioapic, PINS_MASKED);
 	}
 
 	return 0;
+}
+
+void ioapic_cell_reset(struct cell *cell)
+{
+	struct cell_ioapic *ioapic;
+	unsigned int n;
+
+	for_each_cell_ioapic(ioapic, cell, n)
+		ioapic_mask_cell_pins(ioapic, PINS_MASKED);
 }
 
 void ioapic_cell_exit(struct cell *cell)

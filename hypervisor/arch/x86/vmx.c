@@ -792,7 +792,7 @@ void __attribute__((noreturn)) vcpu_deactivate_vmm(void)
 
 void vcpu_vendor_reset(unsigned int sipi_vector)
 {
-	unsigned long val;
+	unsigned long reset_addr, val;
 	bool ok = true;
 
 	ok &= vmx_set_guest_cr(CR0_IDX, X86_CR0_NW | X86_CR0_CD | X86_CR0_ET);
@@ -803,18 +803,24 @@ void vcpu_vendor_reset(unsigned int sipi_vector)
 	ok &= vmcs_write64(GUEST_RFLAGS, 0x02);
 	ok &= vmcs_write64(GUEST_RSP, 0);
 
-	val = 0;
 	if (sipi_vector == APIC_BSP_PSEUDO_SIPI) {
-		val = 0xfff0;
-		sipi_vector = 0xf0;
-
 		/* only cleared on hard reset */
 		ok &= vmcs_write64(GUEST_IA32_DEBUGCTL, 0);
-	}
-	ok &= vmcs_write64(GUEST_RIP, val);
 
-	ok &= vmcs_write16(GUEST_CS_SELECTOR, sipi_vector << 8);
-	ok &= vmcs_write64(GUEST_CS_BASE, sipi_vector << 12);
+		reset_addr = this_cell()->config->cpu_reset_address;
+
+		ok &= vmcs_write64(GUEST_RIP, reset_addr & 0xffff);
+
+		ok &= vmcs_write16(GUEST_CS_SELECTOR,
+				   (reset_addr >> 4) & 0xf000);
+		ok &= vmcs_write64(GUEST_CS_BASE, reset_addr & ~0xffffL);
+	} else {
+		ok &= vmcs_write64(GUEST_RIP, 0);
+
+		ok &= vmcs_write16(GUEST_CS_SELECTOR, sipi_vector << 8);
+		ok &= vmcs_write64(GUEST_CS_BASE, sipi_vector << 12);
+	}
+
 	ok &= vmcs_write32(GUEST_CS_LIMIT, 0xffff);
 	ok &= vmcs_write32(GUEST_CS_AR_BYTES, 0x0009b);
 
@@ -908,7 +914,8 @@ void vcpu_park(void)
 		return;
 	}
 #endif
-	vcpu_vendor_reset(APIC_BSP_PSEUDO_SIPI);
+	vcpu_vendor_reset(0);
+	vmcs_write64(GUEST_IA32_DEBUGCTL, 0);
 	vmcs_write64(EPT_POINTER, paging_hvirt2phys(parking_pt.root_table) |
 				  EPT_TYPE_WRITEBACK | EPT_PAGE_WALK_LEN);
 }
@@ -997,22 +1004,43 @@ static bool vmx_handle_cr(void)
 	return false;
 }
 
-bool vcpu_get_guest_paging_structs(struct guest_paging_structures *pg_structs)
+void vcpu_get_guest_paging_structs(struct guest_paging_structures *pg_structs)
 {
+	struct per_cpu *cpu_data = this_cpu_data();
+	unsigned int n;
+
 	if (vmcs_read32(VM_ENTRY_CONTROLS) & VM_ENTRY_IA32E_MODE) {
 		pg_structs->root_paging = x86_64_paging;
 		pg_structs->root_table_gphys =
 			vmcs_read64(GUEST_CR3) & BIT_MASK(51, 12);
-	} else if (vmcs_read64(GUEST_CR0) & X86_CR0_PG &&
-		 !(vmcs_read64(GUEST_CR4) & X86_CR4_PAE)) {
+	} else if (!(vmcs_read64(GUEST_CR0) & X86_CR0_PG)) {
+		pg_structs->root_paging = NULL;
+	} else if (vmcs_read64(GUEST_CR4) & X86_CR4_PAE) {
+		pg_structs->root_paging = pae_paging;
+		/*
+		 * Although we read the PDPTEs from the guest registers, we
+		 * need to provide the root table here to please the generic
+		 * page table walker. It will map the PDPT then, but we won't
+		 * use it.
+		 */
+		pg_structs->root_table_gphys =
+			vmcs_read64(GUEST_CR3) & BIT_MASK(31, 5);
+		/*
+		 * The CPU caches the PDPTEs in registers. We need to use them
+		 * instead of reading the entries from guest memory.
+		 */
+		for (n = 0; n < 4; n++)
+			cpu_data->pdpte[n] = vmcs_read64(GUEST_PDPTR0 + n * 2);
+	} else {
 		pg_structs->root_paging = i386_paging;
 		pg_structs->root_table_gphys =
 			vmcs_read64(GUEST_CR3) & BIT_MASK(31, 12);
-	} else {
-		printk("FATAL: Unsupported paging mode\n");
-		return false;
 	}
-	return true;
+}
+
+pt_entry_t vcpu_pae_get_pdpte(page_table_t page_table, unsigned long virt)
+{
+	return &this_cpu_data()->pdpte[(virt >> 30) & 0x3];
 }
 
 void vcpu_vendor_set_guest_pat(unsigned long val)
@@ -1037,8 +1065,7 @@ static bool vmx_handle_apic_access(void)
 		if (offset & 0x00f)
 			break;
 
-		if (!vcpu_get_guest_paging_structs(&pg_structs))
-			break;
+		vcpu_get_guest_paging_structs(&pg_structs);
 
 		inst_len = apic_mmio_access(vmcs_read64(GUEST_RIP),
 					    &pg_structs, offset >> 4,

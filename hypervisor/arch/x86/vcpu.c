@@ -26,12 +26,11 @@
 #include <asm/percpu.h>
 #include <asm/vcpu.h>
 
-/* This page is mapped so the code begins at 0x000ffff0 */
 static u8 __attribute__((aligned(PAGE_SIZE))) parking_code[PAGE_SIZE] = {
-	[0xff0] = 0xfa, /* 1: cli */
-	[0xff1] = 0xf4, /*    hlt */
-	[0xff2] = 0xeb,
-	[0xff3] = 0xfc  /*    jmp 1b */
+	0xfa, /* 1: cli */
+	0xf4, /*    hlt */
+	0xeb,
+	0xfc  /*    jmp 1b */
 };
 
 struct paging_structures parking_pt;
@@ -49,8 +48,7 @@ int vcpu_early_init(void)
 	if (!parking_pt.root_table)
 		return -ENOMEM;
 	return paging_create(&parking_pt, paging_hvirt2phys(parking_code),
-			     PAGE_SIZE, 0x000ff000,
-			     PAGE_READONLY_FLAGS | PAGE_FLAG_US,
+			     PAGE_SIZE, 0, PAGE_READONLY_FLAGS | PAGE_FLAG_US,
 			     PAGING_NON_COHERENT);
 }
 
@@ -93,10 +91,6 @@ int vcpu_cell_init(struct cell *cell)
 	int err;
 	u8 *b;
 
-	/* PM timer has to be provided */
-	if (system_config->platform_info.x86.pm_timer_address == 0)
-		return trace_error(-EINVAL);
-
 	err = vcpu_vendor_cell_init(cell);
 	if (err)
 		return err;
@@ -126,11 +120,13 @@ int vcpu_cell_init(struct cell *cell)
 			*b |= ~*pio_bitmap;
 	}
 
-	/* permit access to the PM timer */
+	/* permit access to the PM timer if there is any */
 	pm_timer_addr = system_config->platform_info.x86.pm_timer_address;
-	for (n = 0; n < 4; n++, pm_timer_addr++) {
-		b = cell_iobm.data;
-		b[pm_timer_addr / 8] &= ~(1 << (pm_timer_addr % 8));
+	if (pm_timer_addr) {
+		for (n = 0; n < 4; n++, pm_timer_addr++) {
+			b = cell_iobm.data;
+			b[pm_timer_addr / 8] &= ~(1 << (pm_timer_addr % 8));
+		}
 	}
 
 	return 0;
@@ -204,7 +200,8 @@ bool vcpu_handle_io_access(void)
 	if (result == 0)
 		result = i8042_access_handler(io.port, io.in, io.size);
 
-	if (result == 1) {
+	/* Also ignore byte access to port 80, often used for delaying IO. */
+	if (result == 1 || (io.port == 0x80 && io.size == 1)) {
 		vcpu_skip_emulated_instruction(io.inst_len);
 		return true;
 	}
@@ -230,8 +227,7 @@ bool vcpu_handle_mmio_access(void)
 	vcpu_vendor_get_execution_state(&x_state);
 	vcpu_vendor_get_mmio_intercept(&intercept);
 
-	if (!vcpu_get_guest_paging_structs(&pg_structs))
-		goto invalid_access;
+	vcpu_get_guest_paging_structs(&pg_structs);
 
 	inst = x86_mmio_parse(x_state.rip, &pg_structs, intercept.is_write);
 	if (!inst.inst_len)
@@ -366,12 +362,17 @@ void vcpu_handle_cpuid(void)
 		cpuid((u32 *)&guest_regs->rax, (u32 *)&guest_regs->rbx,
 		      (u32 *)&guest_regs->rcx, (u32 *)&guest_regs->rdx);
 		if (function == 0x01) {
-			if (this_cell() != &root_cell)
+			if (this_cell() != &root_cell) {
+				guest_regs->rcx &= ~X86_FEATURE_VMX;
 				guest_regs->rcx |= X86_FEATURE_HYPERVISOR;
+			}
 
 			guest_regs->rcx &= ~X86_FEATURE_OSXSAVE;
 			if (vcpu_vendor_get_guest_cr4() & X86_CR4_OSXSAVE)
 				guest_regs->rcx |= X86_FEATURE_OSXSAVE;
+		} else if (function == 0x80000001) {
+			if (this_cell() != &root_cell)
+				guest_regs->rcx &= ~X86_FEATURE_SVM;
 		}
 		break;
 	}
