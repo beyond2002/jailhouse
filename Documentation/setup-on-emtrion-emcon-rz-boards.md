@@ -25,9 +25,15 @@ Install and start Jailhouse on emCON-RZ/G1x
 First we need access to the RootFS of the Linux running on the emCON-RZ/G1x. We assume that you
 have mounted this on your development workstation through sshfs or nfs.
 
-Copy the Jailhouse config file to the hypervisor include directory:
+Now in your Jailhouse source directory, create a file include/jailhouse/config.h.
 
-cp -av ci/jailhouse-config-emcon-rzg.h include/jailhouse/config.h
+If you own an emCON-RZ/G1E or emCON-RZ/G1M put the following line to this file:
+
+#define CONFIG_MACH_EMCON_RZG		1
+
+If you own an emCON-RZ/G1H put the following line to this file:
+
+#define CONFIG_MACH_EMCON_RZG1H		1
 
 Then you can compile and install Jailhouse using this command on the development workstation:
 
@@ -40,14 +46,14 @@ of the root cell. We have to copy this configuration manually using these comman
 command line on the development workstation:
 
 mkdir -p /jailhouse/configs
-cp configs/emtrion-rzg1**x**.cell /jailhouse/configs
+cp configs/arm/emtrion-rzg1**x**.cell /jailhouse/configs
 
 Now we can unmount the RootFS of the emCON-RZ/G1x board because the other steps are executed
 on the emCON-RZ/G1x board. On the console of the started Linux on emCON-RZ/G1x execute the
 following commands to enable Jailhouse:
 
 modprobe jailhouse
-jailhouse enable /jailhouse/configs/emtrion-rzg1**x**.cell
+jailhouse enable /jailhouse/configs/arm/emtrion-rzg1**x**.cell
 
 Running the Jailhouse UART demo as an inmate on emcon-RZ/G1x
 ------------------------------------------------------------
@@ -57,7 +63,7 @@ a string on the serial device in a loop.
 First you have to copy the following files from the Jailhouse development tree into the RootFS
 of the root cell:
 
-cp configs/emtrion-rzg1**x**-uart-demo.cell /jailhouse/configs
+cp configs/arm/emtrion-rzg1**x**-uart-demo.cell /jailhouse/configs
 mkdir -p /jailhouse/inmates/uart-demo
 cp inmates/demos/arm/uart-demo.bin /jailhouse/inmates
 
@@ -79,20 +85,11 @@ The sample Linux inmate is setup to use the following devices:
 - SDC0 where the RootFS should be stored
 - I2C2
 
-Currently, it's necessary to use some kernel patches on top of the Linux inmate's kernel, which address
-a common problem of sharing devices between cells without inter-cell communication. On Renesas RZ/G boards
-the Clock Pulse Generator (CPG) is used to turn clocks of certain hardware modules on and off. Since the
-registers of the CPG cannot be shared among inmate and root cell, at the moment only the root cell has
-access to the CPG. As a result the root cell has to make sure that the clocks of the devices used within
-the Linux inmate (SCIF4, SDC0, I2C2) have to be enabled before starting it. Furthermore the device tree of
-the inmate must not comprise clock entries. Some drivers require enabling clocks during probe, otherwise
-the devices will not be initialized. The kernel patches fix this problem for now.
-
 To setup the Linux inmate you have to first copy the following files from the Jailhouse tree into the RootFS
 of the root cell:
 
-cp configs/emtrion-rzg1**x**-linux-demo.cell /jailhouse/configs
-cp configs/dts/inmate-emtrion-emconrzg1**x**.dtb /jailhouse/configs
+cp configs/arm/emtrion-rzg1**x**-linux-demo.cell /jailhouse/configs
+cp configs/arm/dts/inmate-emtrion-emconrzg1**x**.dtb /jailhouse/configs
 
 We assume that these files are available in the path /jailhouse/configs on the RootFS of the
 root cell. Make sure you have installed Python on the emCON-RZ/G1x board.

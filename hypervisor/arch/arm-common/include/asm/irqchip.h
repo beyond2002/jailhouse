@@ -48,7 +48,7 @@ struct irqchip {
 	int	(*send_sgi)(struct sgi *sgi);
 	u32	(*read_iar_irqn)(void);
 	void	(*eoi_irq)(u32 irqn, bool deactivate);
-	int	(*inject_irq)(struct per_cpu *cpu_data, u16 irq_id);
+	int	(*inject_irq)(struct per_cpu *cpu_data, u16 irq_id, u16 sender);
 	void	(*enable_maint_irq)(bool enable);
 	bool	(*has_pending_irqs)(void);
 	int	(*get_pending_irq)(void);
@@ -64,6 +64,17 @@ struct irqchip {
 	enum mmio_result (*handle_dist_access)(struct mmio_access *mmio);
 
 	unsigned long gicd_size;
+};
+
+struct pending_irqs {
+	/* synchronizes parallel insertions of SGIs into the pending ring */
+	spinlock_t lock;
+	u16 irqs[MAX_PENDING_IRQS];
+	/* contains the calling CPU ID in case of a SGI */
+	u16 sender[MAX_PENDING_IRQS];
+	unsigned int head;
+	/* removal from the ring happens lockless, thus tail is volatile */
+	volatile unsigned int tail;
 };
 
 unsigned int irqchip_mmio_count_regions(struct cell *cell);
